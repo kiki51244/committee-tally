@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>委員推薦人選自動統計工具 (含推薦委員細節)</title>
+    <!-- 載入 XLSX 匯出函式庫 -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        * { box-sizing: border-box; font-family: "Microsoft JhengHei", sans-serif; }
+        body { background-color: #f0f4f8; color: #1e293b; margin: 0; padding: 20px; }
+        .container { max-width: 1300px; margin: 0 auto; }
+        h1 { font-size: 22px; color: #0f172a; margin-bottom: 6px; }
+        p.subtitle { color: #64748b; font-size: 14px; margin-top: 0; margin-bottom: 16px; }
+        
+        .control-bar { background: #ffffff; padding: 12px 16px; border-radius: 8px; border: 1px solid #cbd5e1; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
+        .control-bar label { font-weight: bold; font-size: 14px; color: #1e3a8a; }
+        .control-bar input { width: 60px; padding: 6px; font-size: 14px; border: 1px solid #94a3b8; border-radius: 4px; text-align: center; }
+
+        .main-grid { display: grid; grid-template-columns: 1.8fr 1.2fr; gap: 20px; }
+        @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
+
+        .inputs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+        .card { background: #ffffff; border-radius: 8px; padding: 12px; border: 1px solid #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .card h3 { margin: 0 0 8px 0; font-size: 15px; color: #1e3a8a; }
+        textarea { width: 100%; height: 180px; border: 1px solid #94a3b8; border-radius: 6px; padding: 8px; font-size: 14px; resize: vertical; outline: none; }
+        textarea:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.2); }
+
+        .result-card { background: #ffffff; border-radius: 8px; padding: 16px; border: 1px solid #cbd5e1; height: fit-content; }
+        .result-card h2 { margin-top: 0; font-size: 18px; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { text-align: left; padding: 8px 10px; font-size: 14px; border-bottom: 1px solid #e2e8f0; }
+        th { background-color: #f8fafc; color: #475569; }
+        .rank { font-weight: bold; width: 40px; text-align: center; }
+        .count { font-weight: bold; color: #2563eb; text-align: center; width: 60px; }
+        .comm-list { color: #475569; font-size: 13px; }
+
+        .actions { margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+        button { padding: 10px 16px; border-radius: 6px; border: none; font-size: 14px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .btn-update { background-color: #2563eb; color: white; }
+        .btn-clear { background-color: #e2e8f0; color: #475569; }
+        .btn-clear:hover { background-color: #cbd5e1; }
+        .btn-copy { background-color: #475569; color: white; }
+        .btn-copy:hover { background-color: #334155; }
+        .btn-excel { background-color: #16a34a; color: white; }
+        .btn-excel:hover { background-color: #15803d; }
+        .btn-csv { background-color: #0284c7; color: white; }
+        .btn-csv:hover { background-color: #0369a1; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>委員推薦人選自動統計工具</h1>
+    <p class="subtitle">自動去重、即時計算推薦次數，並列出各被推薦人的「推薦委員清單」。</p>
+
+    <!-- 控制區：調整委員人數 -->
+    <div class="control-bar">
+        <label for="memberCount">設定委員人數：</label>
+        <input type="number" id="memberCount" value="5" min="1" max="20">
+        <button class="btn-update" onclick="updateCommitteeCount()">更新人數</button>
+    </div>
+
+    <div class="main-grid">
+        <!-- 動態委員輸入區 -->
+        <div class="inputs-grid" id="inputsContainer"></div>
+
+        <!-- 統計結果 -->
+        <div class="result-card">
+            <h2>統計結果</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th class="rank">排名</th>
+                        <th>被推薦人</th>
+                        <th class="count">次數</th>
+                        <th>推薦委員</th>
+                    </tr>
+                </thead>
+                <tbody id="result-body">
+                    <tr><td colspan="4" style="color: #94a3b8; text-align: center; padding: 20px;">尚無統計資料</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 功能與下載按鈕 -->
+    <div class="actions">
+        <button class="btn-clear" onclick="clearAll()">清除資料</button>
+        <button class="btn-copy" onclick="copyResult()">複製結果</button>
+        <button class="btn-csv" onclick="exportCSV()">下載 CSV 表單</button>
+        <button class="btn-excel" onclick="exportExcel()">匯出 Excel (.xlsx)</button>
+    </div>
+</div>
+
+<script>
+let currentCount = 5;
+
+function initInputs(count) {
+    const container = document.getElementById('inputsContainer');
+    const currentData = {};
+    for (let i = 1; i <= currentCount; i++) {
+        const el = document.getElementById(`c${i}`);
+        if (el) currentData[i] = el.value;
+    }
+
+    container.innerHTML = '';
+    currentCount = count;
+
+    for (let i = 1; i <= count; i++) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+            <h3>委員 ${i}</h3>
+            <textarea id="c${i}" placeholder="輸入推薦姓名..." oninput="calculate()">${currentData[i] || ''}</textarea>
+        `;
+        container.appendChild(card);
+    }
+    calculate();
+}
+
+function updateCommitteeCount() {
+    const count = parseInt(document.getElementById('memberCount').value) || 5;
+    if (count < 1) return;
+    initInputs(count);
+}
+
+function parseNames(text) {
+    if (!text) return new Set();
+    const names = text.split(/[\n,，、\s]+/).map(n => n.trim()).filter(n => n.length > 0);
+    return new Set(names);
+}
+
+function getSortedData() {
+    const tally = {}; // { 姓名: { count: 次數, committees: [委員1, 委員2] } }
+    
+    for (let i = 1; i <= currentCount; i++) {
+        const text = document.getElementById(`c${i}`) ? document.getElementById(`c${i}`).value : '';
+        const uniqueNames = parseNames(text);
+        uniqueNames.forEach(name => {
+            if (!tally[name]) {
+                tally[name] = { count: 0, committees: [] };
+            }
+            tally[name].count += 1;
+            tally[name].committees.push(`委員 ${i}`);
+        });
+    }
+
+    // 依推薦次數由大到小排序
+    return Object.entries(tally).sort((a, b) => b[1].count - a[1].count);
+}
+
+function calculate() {
+    const sorted = getSortedData();
+    const tbody = document.getElementById('result-body');
+
+    if (sorted.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="color: #94a3b8; text-align: center; padding: 20px;">尚無統計資料</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = sorted.map((item, index) => {
+        const name = item[0];
+        const count = item[1].count;
+        const comms = item[1].committees.join(', ');
+        return `
+            <tr>
+                <td class="rank">${index + 1}</td>
+                <td><strong>${name}</strong></td>
+                <td class="count">${count} 次</td>
+                <td class="comm-list">${comms}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function clearAll() {
+    for (let i = 1; i <= currentCount; i++) {
+        if (document.getElementById(`c${i}`)) {
+            document.getElementById(`c${i}`).value = '';
+        }
+    }
+    calculate();
+}
+
+function copyResult() {
+    const sorted = getSortedData();
+    if (sorted.length === 0) { alert('尚無可複製的統計資料'); return; }
+    let text = "排名\t被推薦人\t獲推薦次數\t推薦委員\n";
+    sorted.forEach((item, index) => {
+        text += `${index + 1}\t${item[0]}\t${item[1].count}\t${item[1].committees.join(', ')}\n`;
+    });
+    navigator.clipboard.writeText(text).then(() => alert('已成功複製統計結果至剪貼簿！'));
+}
+
+// 匯出 Excel (.xlsx) 功能
+function exportExcel() {
+    const sorted = getSortedData();
+    if (sorted.length === 0) { alert('尚無可匯出的統計資料'); return; }
+
+    const data = [["排名", "被推薦人姓名", "獲推薦總次數", "推薦委員"]];
+    sorted.forEach((item, index) => {
+        data.push([index + 1, item[0], item[1].count, item[1].committees.join(', ')]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "委員推薦統計結果");
+    XLSX.writeFile(wb, `委員推薦人選統計表_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+// 下載 CSV 功能
+function exportCSV() {
+    const sorted = getSortedData();
+    if (sorted.length === 0) { alert('尚無可下載的統計資料'); return; }
+
+    let csvContent = "\uFEFF排名,被推薦人姓名,獲推薦總次數,推薦委員\n";
+    sorted.forEach((item, index) => {
+        csvContent += `${index + 1},"${item[0]}",${item[1].count},"${item[1].committees.join(', ')}"\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `委員推薦人選統計表_${new Date().toISOString().slice(0,10)}.csv`;
+    link.click();
+}
+
+initInputs(5);
+</script>
+
+</body>
+</html>
